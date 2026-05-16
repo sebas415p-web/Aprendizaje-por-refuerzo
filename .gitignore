@@ -1,0 +1,7 @@
+/venv
+/examples
+/proyecto
+/agents.md
+__pycache__/
+*.mp4
+*.toml
