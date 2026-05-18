@@ -76,7 +76,7 @@ class TwoRoomsEnv:
     # Posiciones fijas de los elementos (columna, fila)
     AGENT_START = (0, 2)   # Esquina izquierda, fila central
     KEY_POS     = (3, 1)   # Columna derecha de habitación izq., fila 1
-    BALL_POS    = (2, 3)   # Frente a la puerta, fila 3
+    BALL_POS    = (3, 3)   # Frente a la puerta, fila 3
     DOOR_POS    = (4, 3)   # Pared divisoria, fila 3 (donde hay puerta)
     GOAL_POS    = (6, 0)   # Habitación derecha, fila superior
     WALL_COL    = 4        # Toda la columna 4 es pared excepto la puerta

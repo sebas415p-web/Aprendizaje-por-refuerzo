@@ -45,7 +45,7 @@ class MainWindow(QMainWindow):
         title.setStyleSheet("color: #bd93f9; font-size: 18px; font-weight: bold; border: none;")
         layout.addWidget(title)
 
-        subtitle = QLabel("Definición del Ambiente, Estados y Recompensas")
+        subtitle = QLabel("Entrega final")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         subtitle.setStyleSheet("color: #6272a4; font-size: 12px; border: none;")
         layout.addWidget(subtitle)

@@ -18,16 +18,6 @@ class QTableTab(QWidget):
 
         btn_layout = QHBoxLayout()
 
-        self._export_pkl_btn = QPushButton("Exportar .pkl")
-        self._export_pkl_btn.setEnabled(False)
-        self._export_pkl_btn.clicked.connect(self._export_pkl)
-        btn_layout.addWidget(self._export_pkl_btn)
-
-        self._export_json_btn = QPushButton("Exportar .json (legible)")
-        self._export_json_btn.setEnabled(False)
-        self._export_json_btn.clicked.connect(self._export_json)
-        btn_layout.addWidget(self._export_json_btn)
-
         self._export_txt_btn = QPushButton("Exportar .txt")
         self._export_txt_btn.setEnabled(False)
         self._export_txt_btn.clicked.connect(self._export_txt)
@@ -72,15 +62,12 @@ class QTableTab(QWidget):
             QPushButton:hover { background-color: #7082b4; }
             QPushButton:disabled { background-color: #444; color: #888; }
         """
-        for btn in [self._export_pkl_btn, self._export_json_btn,
-                     self._export_txt_btn, self._load_btn, self._refresh_btn]:
+        for btn in [self._export_txt_btn, self._load_btn, self._refresh_btn]:
             btn.setStyleSheet(style)
 
     def set_agent(self, agent):
         self._agent = agent
         has_q = agent is not None and len(agent.Q) > 0
-        self._export_pkl_btn.setEnabled(has_q)
-        self._export_json_btn.setEnabled(has_q)
         self._export_txt_btn.setEnabled(has_q)
         self._refresh_btn.setEnabled(agent is not None)
 
@@ -121,28 +108,6 @@ class QTableTab(QWidget):
 
         self._info.setText(f"{len(items)} estados en la Q-table")
 
-    def _export_pkl(self):
-        if self._agent is None:
-            return
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Guardar Q-table", "qtable.pkl",
-            "Pickle (*.pkl);;All Files (*)"
-        )
-        if path:
-            self._agent.save_qtable(path)
-            QMessageBox.information(self, "Exportado", f"Q-table guardada en:\n{path}")
-
-    def _export_json(self):
-        if self._agent is None:
-            return
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Exportar Q-table legible", "qtable_readable.json",
-            "JSON (*.json);;All Files (*)"
-        )
-        if path:
-            self._agent.export_qtable_readable(path)
-            QMessageBox.information(self, "Exportado", f"Q-table legible guardada en:\n{path}")
-
     def _export_txt(self):
         if self._agent is None:
             return
@@ -152,7 +117,6 @@ class QTableTab(QWidget):
         )
         if not path:
             return
-        from environment import ACTION_NAMES
         lines = []
         header = f"{'x':>3} {'y':>3} {'llave':>6} {'puerta':>7} {'bola':>5} |"
         for a_name in ACTION_NAMES:
@@ -185,8 +149,6 @@ class QTableTab(QWidget):
         agent.load_qtable(path)
         self._agent = agent
         self._populate_table(agent.Q)
-        self._export_pkl_btn.setEnabled(True)
-        self._export_json_btn.setEnabled(True)
         self._export_txt_btn.setEnabled(True)
         self._refresh_btn.setEnabled(True)
         self._status.setText(f"Q-table cargada: {len(agent.Q)} estados, epsilon={agent.epsilon:.4f}")

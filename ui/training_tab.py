@@ -1,14 +1,17 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
                                    QPushButton, QLabel, QSpinBox, QDoubleSpinBox,
-                                   QSlider, QProgressBar, QSplitter, QCheckBox)
-from PyQt6.QtCore import Qt
-from environment import TwoRoomsEnv
+                                   QSlider, QProgressBar, QSplitter, QMessageBox,
+                                   QCheckBox)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QPixmap, QMovie
+from gym_env import TwoRoomsGymEnv
 from ui.grid_widget import GridWidget
 from ui.metrics_widget import MetricsWidget
 from ui.training_thread import TrainingThread
 from ui.video_player import VideoPlayer
 import cv2
 import numpy as np
+import os
 
 
 DEFAULT_ALPHA = 0.1
@@ -23,7 +26,7 @@ DEFAULT_SPEED = 50
 class TrainingTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.env = TwoRoomsEnv()
+        self.env = TwoRoomsGymEnv()
         self.thread = None
         self._training = False
         self._paused = False
@@ -83,9 +86,9 @@ class TrainingTab(QWidget):
         speed_layout.addWidget(self._speed_label)
         train_layout.addLayout(speed_layout)
 
-        self._record_check = QCheckBox("Grabar video del entrenamiento")
-        self._record_check.setChecked(True)
-        train_layout.addWidget(self._record_check)
+        self._stop_on_goal_check = QCheckBox("Detener al alcanzar la meta")
+        self._stop_on_goal_check.setChecked(True)
+        train_layout.addWidget(self._stop_on_goal_check)
 
         left_layout.addWidget(train_group)
 
@@ -115,6 +118,35 @@ class TrainingTab(QWidget):
         self._ep_label.setStyleSheet("color: #888; font-size: 12px;")
         left_layout.addWidget(self._ep_label)
 
+        post_group = QGroupBox("Post-entrenamiento")
+        post_layout = QVBoxLayout(post_group)
+
+        self._eval_btn = QPushButton("Evaluar agente")
+        self._eval_btn.setEnabled(False)
+        self._eval_btn.clicked.connect(self._run_evaluate)
+        post_layout.addWidget(self._eval_btn)
+
+        self._plot_btn = QPushButton("Curvas de aprendizaje (.png)")
+        self._plot_btn.setEnabled(False)
+        self._plot_btn.clicked.connect(self._run_plot)
+        post_layout.addWidget(self._plot_btn)
+
+        self._demo_btn = QPushButton("Generar demo GIF")
+        self._demo_btn.setEnabled(False)
+        self._demo_btn.clicked.connect(self._run_demo)
+        post_layout.addWidget(self._demo_btn)
+
+        self._report_btn = QPushButton("Generar reporte (.md)")
+        self._report_btn.setEnabled(False)
+        self._report_btn.clicked.connect(self._run_report)
+        post_layout.addWidget(self._report_btn)
+
+        self._post_status = QLabel("")
+        self._post_status.setStyleSheet("color: #50fa7b; font-size: 11px;")
+        post_layout.addWidget(self._post_status)
+
+        left_layout.addWidget(post_group)
+
         left_layout.addStretch()
         main_layout.addWidget(left_panel)
 
@@ -133,6 +165,13 @@ class TrainingTab(QWidget):
 
         self._video_player = VideoPlayer()
         bot_layout.addWidget(self._video_player)
+
+        self._demo_viewer = QLabel("Demo GIF / Curvas PNG")
+        self._demo_viewer.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._demo_viewer.setStyleSheet("background-color: #1e1e28; color: #888;")
+        self._demo_viewer.setMinimumHeight(100)
+        self._demo_viewer.hide()
+        bot_layout.addWidget(self._demo_viewer)
 
         right_splitter.addWidget(bot_right)
         right_splitter.setSizes([420, 300])
@@ -211,9 +250,20 @@ class TrainingTab(QWidget):
             QPushButton:hover { background-color: #ff7777; }
             QPushButton:disabled { background-color: #444; color: #888; }
         """
+        style_post = """
+            QPushButton {
+                background-color: #bd93f9; color: #282a36;
+                border: none; padding: 8px; border-radius: 4px;
+                font-size: 12px; font-weight: bold;
+            }
+            QPushButton:hover { background-color: #d4aaff; }
+            QPushButton:disabled { background-color: #444; color: #888; }
+        """
         self._start_btn.setStyleSheet(style_start)
         self._pause_btn.setStyleSheet(style_ctrl)
         self._stop_btn.setStyleSheet(style_stop)
+        for btn in [self._eval_btn, self._plot_btn, self._demo_btn, self._report_btn]:
+            btn.setStyleSheet(style_post)
 
     def _connect_signals(self):
         self._speed_slider.valueChanged.connect(self._on_speed_changed)
@@ -269,9 +319,9 @@ class TrainingTab(QWidget):
         self.thread.configure(
             n_episodes=self.n_episodes,
             speed_ms=self.speed_ms,
-            record_video=self._record_check.isChecked(),
             alpha=self.alpha, gamma=self.gamma, epsilon=self.epsilon,
             epsilon_min=self.epsilon_min, epsilon_decay=self.epsilon_decay,
+            stop_on_goal=self._stop_on_goal_check.isChecked(),
         )
 
         self.thread.step_signal.connect(self._on_step)
@@ -312,18 +362,101 @@ class TrainingTab(QWidget):
 
     def _on_goal_reached(self, episode):
         self._ep_label.setText(f"Meta alcanzada en episodio {episode}!")
+        if self._stop_on_goal_check.isChecked():
+            self._generate_video()
+        self._enable_post_actions()
 
     def _on_finished(self):
         self._reset_ui()
-
-        if self.thread and self.thread.record_video and self.thread.frames:
+        if not self._stop_on_goal_check.isChecked():
             self._generate_video()
+        self._enable_post_actions()
 
         if self.thread:
             agent = self.thread.get_agent()
             main_win = self._find_main_window()
             if main_win:
                 main_win.on_training_finished(agent)
+
+    def _enable_post_actions(self):
+        has_log = os.path.exists("training_log.json") or (
+            self.thread and self.thread._rewards_h
+        )
+        has_qtable = os.path.exists("qtable.pkl")
+        self._eval_btn.setEnabled(has_qtable)
+        self._plot_btn.setEnabled(has_log)
+        self._demo_btn.setEnabled(has_qtable)
+        self._report_btn.setEnabled(has_qtable and has_log)
+        self._post_status.setText("Q-table y log guardados. Acciones disponibles." 
+                                  if has_qtable else "Esperando archivos...")
+
+    def _run_evaluate(self):
+        from evaluate import evaluate
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Evaluando agente...")
+        msg.setText("Ejecutando evaluación...")
+        msg.show()
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(100, lambda: self._do_evaluate(msg))
+
+    def _do_evaluate(self, msg):
+        from evaluate import evaluate
+        try:
+            all_r, all_s, all_ok = evaluate("qtable.pkl", n_episodes=10, render=False)
+            msg.close()
+            text = (f"Tasa de éxito: {np.mean(all_ok)*100:.1f}%\n"
+                    f"Recompensa prom: {np.mean(all_r):.2f} ± {np.std(all_r):.2f}\n"
+                    f"Pasos promedio: {np.mean(all_s):.1f}")
+            QMessageBox.information(self, "Resultado de evaluación", text)
+        except Exception as e:
+            msg.close()
+            QMessageBox.warning(self, "Error", str(e))
+
+    def _run_plot(self):
+        from plot_results import plot
+        try:
+            plot("training_log.json", "learning_curves.png")
+            pix = QPixmap("learning_curves.png")
+            self._demo_viewer.show()
+            self._demo_viewer.setPixmap(pix.scaled(
+                self._demo_viewer.width(), self._demo_viewer.height(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            ))
+            self._post_status.setText("Curvas generadas: learning_curves.png")
+        except Exception as e:
+            QMessageBox.warning(self, "Error", str(e))
+
+    def _run_demo(self):
+        self._post_status.setText("Generando demo GIF...")
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(100, self._do_demo)
+
+    def _do_demo(self):
+        from visualize import generate_demo
+        try:
+            generate_demo("qtable.pkl", "demo_agente.gif", save_frames=False, fps=4)
+            movie = QMovie("demo_agente.gif")
+            self._demo_viewer.show()
+            self._demo_viewer.setMovie(movie)
+            movie.start()
+            self._post_status.setText("Demo GIF generado: demo_agente.gif")
+        except Exception as e:
+            QMessageBox.warning(self, "Error", str(e))
+
+    def _run_report(self):
+        from ui.report_generator import generate_report
+        params = {
+            "alpha": self.alpha, "gamma": self.gamma,
+            "epsilon": self.epsilon, "epsilon_min": self.epsilon_min,
+            "epsilon_decay": self.epsilon_decay,
+        }
+        try:
+            generate_report(agent_params=params)
+            self._post_status.setText("Reporte generado: reporte.md")
+            QMessageBox.information(self, "Reporte", "reporte.md generado exitosamente.")
+        except Exception as e:
+            QMessageBox.warning(self, "Error", str(e))
 
     def _generate_video(self):
         if not self.thread or not self.thread.frames:

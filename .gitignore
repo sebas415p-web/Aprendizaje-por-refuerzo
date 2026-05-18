@@ -4,4 +4,11 @@
 /agents.md
 __pycache__/
 *.mp4
+*.gif
+*.png
+reporte.md
+qtable.pkl
+qtable.txt
+qtable_readable.json
+training_log.json
 *.toml
